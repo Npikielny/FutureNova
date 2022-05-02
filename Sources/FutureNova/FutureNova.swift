@@ -1,48 +1,46 @@
 import Foundation
 
-public struct FutureNova {
+public typealias CompletionHandler<Success> = (_ result: Result<Success, NetworkingError>) -> Void
+
+public enum RequestType: CustomStringConvertible {
+    case get
+    case post
+    case delete
+    case update, put
     
+    public var description: String {
+        switch self {
+            case .get: return "GET"
+            case .post: return "POST"
+            case .delete: return "DELETE"
+            case .update, .put: return "PUT"
+        }
+    }
+}
+
+public enum NetworkingError: Error, CustomStringConvertible {
+    case uncategorized(String)
+    case decodingError(Error, Data, URLResponse?)
+    case urlSessionError(Error)
+    case invalidPath(String)
+    
+    public var description: String {
+        switch self {
+            case .uncategorized(let string): return "Uncategorized: \(string)"
+            case .decodingError(let error, _, _): return error.localizedDescription
+            case .invalidPath(let path): return "URL not found: \(path)"
+            case .urlSessionError(let error): return "Session error: \(error.localizedDescription)"
+        }
+    }
+}
+
+public class NetworkManager {
     static let defaultSession = URLSession(configuration: .default)
-    
-    public typealias CompletionHandler<Success> = (_ result: Result<Success, NetworkingError>) -> Void
+    let host: String
     
     public var decoder: JSONDecoder
     public var encoder: JSONEncoder
-    
-    public enum RequestType: CustomStringConvertible {
-        case get
-        case post
-        case delete
-        case update, put
-        
-        public var description: String {
-            switch self {
-                case .get: return "GET"
-                case .post: return "POST"
-                case .delete: return "DELETE"
-                case .update, .put: return "PUT"
-            }
-        }
-    }
-    
-    public enum NetworkingError: Error, CustomStringConvertible {
-        case uncategorized(String)
-        case decodingError(Error, Data)
-        case urlSessionError(Error)
-        case invalidPath(String)
-        
-        public var description: String {
-            switch self {
-                case .uncategorized(let string): return "Uncategorized: \(string)"
-                case .decodingError(let error, _): return error.localizedDescription
-                case .invalidPath(let path): return "URL not found: \(path)"
-                case .urlSessionError(let error): return "Session error: \(error.localizedDescription)"
-            }
-        }
-    }
 
-    private var host: String
-    
     public init(
         host: String,
         decoder: JSONDecoder? = nil,
@@ -59,7 +57,7 @@ public struct FutureNova {
         self.encoder = encoder ?? JSONEncoder()
     }
     
-    private func createRequest(
+    func createRequest(
         route: String,
         parameters: CustomStringConvertible...,
         requestType: RequestType
@@ -75,24 +73,38 @@ public struct FutureNova {
         
         return URLRequest(url: url)
     }
-    
+}
+
+public class FutureNova: NetworkManager {
     private func dispatchDataTask<Success: Codable>(
         request: URLRequest,
         completionHandler: @escaping CompletionHandler<Success>) {
         
-        let dataTask = Self.defaultSession.dataTask(with: request) { data, response, error in
+        let dataTask = Self.defaultSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { completionHandler(.failure(.uncategorized("self does not exist"))); return }
             if let error = error {
-                completionHandler(.failure(.urlSessionError(error)))
+                DispatchQueue.main.async {
+                    completionHandler(.failure(.urlSessionError(error)))
+                }
                 return
             } else if let data = data {
                 do {
-                    let decodedData = try decoder.decode(Success.self, from: data)
-                    completionHandler(.success(decodedData))
+                    let decodedData = try self.decoder.decode(Success.self, from: data)
+                    DispatchQueue.main.async {
+                        completionHandler(.success(decodedData))
+                    }
+                    return
                 } catch {
-                    completionHandler(.failure(.decodingError(error, data)))
+                    DispatchQueue.main.async {
+                        completionHandler(.failure(.decodingError(error, data, response)))
+                    }
+                    return
                 }
             } else {
-                completionHandler(.failure(.uncategorized("No data recieved")))
+                DispatchQueue.main.async {
+                    completionHandler(.failure(.uncategorized("No data recieved")))
+                }
+                return
             }
         }
         dataTask.resume()
@@ -160,5 +172,73 @@ public struct FutureNova {
         completionHandler: @escaping CompletionHandler<Success>
     ) {
         networkRequest(route: route, parameters: parameters, requestType: .post, content: content, completionHandler: completionHandler)
+    }
+}
+
+
+@available(macOS 12.0, *)
+@available(iOS 15.0, *)
+public class AsyncFutureNova: NetworkManager {
+    public func networkRequest<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        requestType: RequestType,
+        content: Body? = nil
+    ) async throws -> Success {
+        var request = try createRequest(route: route, parameters: parameters, requestType: requestType)
+        try request.setContent(content: content, encoder: encoder)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        do {
+            return try self.decoder.decode(Success.self, from: data)
+        } catch {
+            throw NetworkingError.decodingError(error, data, response)
+        }
+    }
+    
+    public func bodylessRequest<Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        requestType: RequestType
+    ) async throws -> Success {
+        let request = try createRequest(route: route, parameters: parameters, requestType: requestType)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        do {
+            return try self.decoder.decode(Success.self, from: data)
+        } catch {
+            throw NetworkingError.decodingError(error, data, response)
+        }
+    }
+    
+    public func get<Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...
+    ) async throws -> Success {
+        try await bodylessRequest(route: route, parameters: parameters, requestType: .get)
+    }
+    
+    public func update<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        content: Body? = nil
+    ) async throws -> Success {
+        try await networkRequest(route: route, parameters: parameters, requestType: .put, content: content)
+    }
+    
+    public func post<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        content: Body?
+    ) async throws -> Success {
+        try await networkRequest(route: route, parameters: parameters, requestType: .post, content: content)
+    }
+    
+    public func delete<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        content: Body?
+    ) async throws -> Success {
+        try await networkRequest(route: route, parameters: parameters, requestType: .delete, content: content)
     }
 }
