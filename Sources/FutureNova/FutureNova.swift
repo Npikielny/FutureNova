@@ -9,7 +9,7 @@ public struct FutureNova {
         let dec = JSONDecoder()
         if #available(macOS 10.12, *) {
             dec.dateDecodingStrategy = .iso8601
-        }
+        } else {}
         return dec
     }()
     
