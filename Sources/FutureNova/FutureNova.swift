@@ -106,7 +106,7 @@ public struct FutureNova {
         dataTask.resume()
     }
     
-    private func networkRequest<Body: Codable, Success: Codable>(
+    public func networkRequest<Body: Codable, Success: Codable>(
         route: String,
         parameters: CustomStringConvertible...,
         requestType: RequestType,
@@ -122,7 +122,7 @@ public struct FutureNova {
         }
     }
     
-    private func bodylessRequest<Success: Codable>(
+    public func bodylessRequest<Success: Codable>(
         route: String,
         parameters: CustomStringConvertible...,
         requestType: RequestType,
@@ -139,7 +139,6 @@ public struct FutureNova {
     public func get<Success: Codable>(
         route: String,
         parameters: CustomStringConvertible...,
-        requestType: RequestType,
         completionHandler: @escaping CompletionHandler<Success>) {
             bodylessRequest(route: route, parameters: parameters, requestType: .get, completionHandler: completionHandler)
     }
@@ -151,5 +150,23 @@ public struct FutureNova {
         completionHandler: @escaping CompletionHandler<Success>
     ) {
         networkRequest(route: route, parameters: parameters, requestType: .update, content: content, completionHandler: completionHandler)
+    }
+    
+    public func delete<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        content: Body? = nil,
+        completionHandler: @escaping CompletionHandler<Success>
+    ) {
+        networkRequest(route: route, parameters: parameters, requestType: .delete, content: content, completionHandler: completionHandler)
+    }
+    
+    public func post<Body: Codable, Success: Codable>(
+        route: String,
+        parameters: CustomStringConvertible...,
+        content: Body? = nil,
+        completionHandler: @escaping CompletionHandler<Success>
+    ) {
+        networkRequest(route: route, parameters: parameters, requestType: .post, content: content, completionHandler: completionHandler)
     }
 }
