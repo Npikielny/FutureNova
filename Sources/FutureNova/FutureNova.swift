@@ -175,7 +175,6 @@ public class FutureNova: NetworkManager {
     }
 }
 
-
 @available(macOS 12.0, *)
 @available(iOS 15.0, *)
 public class AsyncFutureNova: NetworkManager {
